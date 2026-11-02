@@ -6,8 +6,14 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include <stdlib.h>
+#ifdef CONFIG_VIRTUAL_SCREEN
+#include "managers/display_manager.h"
+#endif
 
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
+/* The generic S3 exposes USB Serial/JTAG as a secondary console even when
+ * the dashboard is connected to UART0 through an external USB-serial bridge.
+ * The virtual S3 profile uses that primary UART for both input and frames. */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED && !defined(CONFIG_VIRTUAL_SCREEN)
 #include "driver/usb_serial_jtag.h"
 #define MIRROR_USE_JTAG 1
 #else
@@ -165,7 +171,7 @@ void screen_mirror_init(void) {
     ESP_LOGI(TAG, "Screen mirror initialized");
 }
 
-void screen_mirror_set_enabled(bool enabled) {
+static void mirror_set_enabled(bool enabled) {
     s_mirror_enabled = enabled;
     if (enabled) {
         s_frame_count = 0;
@@ -177,14 +183,37 @@ void screen_mirror_set_enabled(bool enabled) {
     }
 }
 
+#ifdef CONFIG_VIRTUAL_SCREEN
+static void mirror_enable_on_lvgl(void *arg) {
+    mirror_set_enabled((uintptr_t)arg != 0);
+}
+#endif
+
+void screen_mirror_set_enabled(bool enabled) {
+#ifdef CONFIG_VIRTUAL_SCREEN
+    display_manager_run_on_lvgl(mirror_enable_on_lvgl, (void *)(uintptr_t)enabled);
+#else
+    mirror_set_enabled(enabled);
+#endif
+}
+
 bool screen_mirror_is_enabled(void) {
     return s_mirror_enabled;
 }
 
-void screen_mirror_refresh(void) {
+static void mirror_refresh(void *arg) {
+    (void)arg;
     if (s_mirror_enabled) {
         lv_obj_invalidate(lv_scr_act());
     }
+}
+
+void screen_mirror_refresh(void) {
+#ifdef CONFIG_VIRTUAL_SCREEN
+    display_manager_run_on_lvgl(mirror_refresh, NULL);
+#else
+    mirror_refresh(NULL);
+#endif
 }
 
 void screen_mirror_send_info(void) {

@@ -789,7 +789,9 @@ static __attribute__((unused)) void invert_flush_cb(lv_disp_drv_t *drv, const lv
     screen_mirror_send_area(area, color_p);
 #endif
     
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_VIRTUAL_SCREEN)
+    lv_disp_flush_ready(drv);
+#elif defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
     m5stack_lvgl_render_callback(drv, area, color_p);
 #elif defined(CONFIG_USE_TDISPLAY_S3)
     i80_display_flush_cb(drv, area, color_p);
@@ -2129,7 +2131,7 @@ void display_manager_init(void) {
   apply_power_management_config(settings_get_power_save_enabled(&G_Settings));
 
   // Configure LEDC timer for backlight (only for PWM boards or TDisplay S3)
-#if defined(CONFIG_USE_TDISPLAY_S3) || (defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R))
+#if !defined(CONFIG_VIRTUAL_SCREEN) && (defined(CONFIG_USE_TDISPLAY_S3) || (defined(CONFIG_LV_DISP_BACKLIGHT_PWM) && !defined(CONFIG_IS_ATOMS3R)))
   ledc_timer_config_t ledc_timer = {
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .duty_resolution = LEDC_TIMER_10_BIT,
@@ -2302,7 +2304,9 @@ ESP_LOGI(TAG, "T-Deck trackball ISRs registered");
   gpio_set_level(40, 0);
   ESP_LOGI(TAG, "CrowPanel rotary power rails enabled (GPIO1/GPIO2), indicator active");
 #endif
-#if defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
+#if defined(CONFIG_VIRTUAL_SCREEN)
+  ESP_LOGI(TAG, "Using virtual display; physical display initialization skipped");
+#elif defined(CONFIG_USE_CARDPUTER) || defined(CONFIG_USE_CARDPUTER_ADV) || defined(CONFIG_IS_ATOMS3R)
   init_m5gfx_display();
 #elif defined(CONFIG_USE_TDISPLAY_S3)
   esp_err_t ret = i80_display_init();
@@ -3997,7 +4001,9 @@ static void display_manager_set_backlight_raw(uint8_t percentage) {
     percentage = (percentage * max_brightness) / 100;
     if (percentage > 100) percentage = 100;
 
-#ifdef CONFIG_USE_TDISPLAY_S3
+#ifdef CONFIG_VIRTUAL_SCREEN
+    (void)percentage;
+#elif defined(CONFIG_USE_TDISPLAY_S3)
     // TDisplay S3 backlight now uses LEDC for PWM control
     uint32_t duty = (percentage * ((1 << LEDC_TIMER_10_BIT) - 1)) / 100;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
@@ -5337,6 +5343,8 @@ void hardware_input_task(void *pvParameters) {
 
     } // enable_touch_polling
 
+    // A virtual display has no backlight/wake button. Keep its remote UI awake.
+#ifndef CONFIG_VIRTUAL_SCREEN
     // backlight dim logic
     uint32_t current_timeout = G_Settings.display_timeout_ms;
 
@@ -5382,6 +5390,7 @@ void hardware_input_task(void *pvParameters) {
         is_backlight_off = false;
     }
     //end backlight dim logic
+#endif
     // When backlight is off (dimmed), poll less frequently to save power
     TickType_t delay = (is_backlight_dimmed ? pdMS_TO_TICKS(BACKLIGHT_SLEEP_POLL_MS) : tick_interval);
     vTaskDelay(delay);
